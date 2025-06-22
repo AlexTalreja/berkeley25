@@ -80,7 +80,7 @@ pytesseract.pytesseract.tesseract_cmd = (
 
 # OPEN AI STUFF
 
-openai.api_key = "sk-let-YTMwN2JlNDAtNDNhNS00MGMzLWIyYTktYjE1ZTZjZWU2ZmE0OjE4ZDFhYTY1LTdiMjMtNDNhZC04MjU5LTM0Nzk1MjdlNmVhOQ=="
+openai.api_key = ""
 GPT_MODEL = "gpt-4o-mini"          # fast & cheap enough for frame-level use
 GPT_FUNC = {
     "name": "mark_sensitive",
