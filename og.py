@@ -78,6 +78,7 @@ PROMPT = (
     "For any string that is *possibly* sensitive (API keys, tokens, "
     "credit-card numbers, SSNs, private or home addresses, phone numbers, "
     "emails, etc.) return its index.\n\n"
+    "Keep in mind, the OCR output might be faulty and not entirely accurate of what is on the screen, so interpolate if it could be in one of those categories."
     "### Lines (index : text)\n{strings}\n\n"
     "Return a JSON array of indexes only, e.g. [1,3]."
 )
