@@ -74,102 +74,91 @@ mp_face = mp.solutions.face_detection.FaceDetection(
 API_KEY_RE = re.compile(r"(AKIA|ASIA|SK|sk_live_)[A-Za-z0-9]{16,}")
 PHRASE_RE  = re.compile(r"(password|secret|apikey|token)", re.I)
 
-pytesseract.pytesseract.tesseract_cmd = (
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # adjust if needed
-)
-
-# OPEN AI STUFF
-
-openai.api_key = ""
-GPT_MODEL = "gpt-4o-mini"          # fast & cheap enough for frame-level use
-GPT_FUNC = {
-    "name": "mark_sensitive",
-    "description": "Return indexes of sensitive strings.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "indexes": {
-                "type": "array",
-                "items": {"type": "integer"},
-                "description": "0-based indexes that MUST be redacted."
-            }
-        },
-        "required": ["indexes"],
-    },
-}
+# pytesseract.pytesseract.tesseract_cmd = (
+#     r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # adjust if needed
+# )
 def find_sensitive_text(gray_img) -> list[tuple[int,int,int,int]]:
     """
     1. OCR the frame exactly as before (pytesseract).
-    2. Ask GPT which snippets are sensitive.
-    3. Return their bounding boxes.
+    2. Ask the Letta agent which snippets are sensitive.
+    3. Extracts the JSON list from the agent's response.
+    4. Return their bounding boxes.
     """
     data = pytesseract.image_to_data(
         gray_img, output_type=pytesseract.Output.DICT
     )
 
-    # Collect candidate strings ≥ 4 chars to keep the prompt short
     texts, idx_map = [], []
     for i, txt in enumerate(data["text"]):
-        if txt and len(txt) >= 4:
-            idx_map.append(i)     # map from compact index -> tesseract index
+        if txt and len(txt.strip()) >= 4:
+            idx_map.append(i)
             texts.append(txt)
 
     if not texts:
         return []
 
-    # --------  Call GPT  ----------------------------------------------------
-
-
-    prompt = (
-        "You are a security assistant looking at raw OCR output.\n"
-        "For any string that is *definitely* sensitive (API keys, "
-        "passwords, tokens, credit-card numbers, SSNs, private addresses, "
-        "personal phone numbers, etc.) you must return its index. For testing purposes now, treat the literal word password as sensitive\n\n"
-        "### Strings (index : text)\n" +
-        "\n".join(f"{i}: {t}" for i, t in enumerate(texts)) + "\n\n"
-        "Respond *only* with JSON that matches the function schema."
+    instruction = (
+        "You are a text redaction assistant. Review the following list of indexed words. "
+        "Identify words that are secrets, keys, passwords, email addresses, street addresses, or PII. "
+        "Your entire response MUST be ONLY a valid JSON array of integers. "
+        "Do not include any other text, greetings, or explanations. "
+        "If no words are sensitive, respond with an empty JSON array: []."
     )
+    word_list = "\n".join(f"{i}: {t}" for i, t in enumerate(texts))
+    prompt = f"{instruction}\n\nWORD LIST:\n{word_list}"
+
+    sensitive_indices = []
     try:
         client = Letta(
-            token="sk-let-YTMwN2JlNDAtNDNhNS00MGMzLWIyYTktYjE1ZTZjZWU2ZmE0OjE4ZDFhYTY1LTdiMjMtNDNhZC04MjU5LTM0Nzk1MjdlNmVhOQ==",
+            token="sk-let-YTg",
         )
-        response = client.templates.agents.create(
-            project="default-project",
-            template_version="numerous-chocolate-mandrill:latest",
-        )
-        result = client.agents.messages.create(
-            agent_id=response.agents[0].id,
+        resp = client.agents.messages.create(
+            agent_id="agent-f32",
             messages=[{"role": "user", "content": prompt}],
         )
-        for message in result.messages:
-            print(message)
-        sensitive = []
-        for message in result.messages:
-            sensitive.extend(json.loads(message["content"])["indexes"])
-        print(sensitive)
-        # rsp = openai.chat.completions.create(
-        #     model=GPT_MODEL,
-        #     messages=[{"role": "system", "content": "You are a helpful assistant."},
-        #               {"role": "user", "content": prompt}],
-        #     functions=[GPT_FUNC],
-        #     function_call={"name": "mark_sensitive"},
-        #     temperature=0.0,
-        # )
 
-        # sensitive = json.loads(rsp.choices[0].message.function_call.arguments)["indexes"]
-        # print(sensitive)
+        print("\n--- INSPECTING AGENT RESPONSE ---")
+        for i, m in enumerate(resp.messages):
+            print(f"\n[Message #{i}]")
+            # Use vars() to see all attributes of the message object (m)
+            print(vars(m))
+        print("\n--- END OF AGENT RESPONSE ---\n")
+        # --- END OF MODIFIED LOGIC ---
+
+        for m in resp.messages:
+            # Your existing logic is here, which we will adapt after we see the output
+            if m.message_type == "assistant_message" and m.content:
+                match = re.search(r'\[(.*?)\]', m.content)
+                if match:
+                    json_string = match.group(0)
+                    try:
+                        sensitive_indices = json.loads(json_string)
+                        # Let's add a print here to confirm success
+                        print(f"Successfully parsed indices: {sensitive_indices}")
+                    except json.JSONDecodeError:
+                        print(f"Warning: Extracted string '{json_string}' is not valid JSON.")
+                        sensitive_indices = []
+                else:
+                    # This is likely what's happening now: content exists but has no list
+                    print(f"Warning: Agent responded but no JSON list was found in m.content: '{m.content}'")
+                    sensitive_indices = []
+
     except Exception as e:
-        print("OpenAI failure, falling back to old regex:", e)
-        sensitive = []   # (or call your old regex here as a backup)
+        print(f"Letta API call failed: {e}. Falling back.")
+        sensitive_indices = []
 
-    # --------  Convert indexes → bounding boxes  ----------------------------
+    # --------  Convert indexes → bounding boxes (No changes needed below) --------
     boxes = []
-    for compact_idx in sensitive:
-        i = idx_map[compact_idx]
-        x, y, w, h = (data[k][i] for k in ("left", "top", "width", "height"))
-        boxes.append((x, y, x + w, y + h))
+    if isinstance(sensitive_indices, list):
+        for compact_idx in sensitive_indices:
+            try:
+                i = idx_map[compact_idx]
+                x, y, w, h = (data[k][i] for k in ("left", "top", "width", "height"))
+                boxes.append((x, y, x + w, y + h))
+            except (IndexError, TypeError):
+                print(f"Warning: Agent returned an invalid index: {compact_idx}")
+                continue
     return boxes
-
 
 # ────────────────────────────────────────────────────────────────
 # helpers
