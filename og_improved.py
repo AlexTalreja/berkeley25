@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-screen_stream_overlay_async.py   (v7.3 – no-flicker blur)
+screen_stream_overlay_async.py  (v7.2 – smooth blur boxes)
 
-* Captures a monitor or window and redacts faces & sensitive text.
-* Blurs stay up until the same area has been *missed* 5 times in a row.
-* Smooth edges + scroll tracking as before.
+  * Detects faces & sensitive text.
+  * Keeps blur rectangles glued to content while scrolling.
+  * Smooth-averages box edges to kill pulsating/flicker.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import pytesseract, mediapipe as mp
 from dotenv import load_dotenv
 from google import genai
 
-# ── constants ───────────────────────────────────────────────────
+# ── constant setup ──────────────────────────────────────────────
 TESS_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 pytesseract.pytesseract.tesseract_cmd = TESS_PATH
 TESS_CONFIG = "--oem 3 --psm 11 -l eng"
@@ -28,7 +28,8 @@ QUICK_REGEX = re.compile(
     r"|\b(?:\d{3}[- ]?)?\d{3}[- ]?\d{4}\b"
     r"|\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b"
     r"|\b\d{3}[- ]?\d{2}[- ]?\d{4}\b"
-    r"|\d{1,5}\s+\w{2,}\s+\w{2,}", re.I)
+    r"|\d{1,5}\s+\w{2,}\s+\w{2,}",
+    re.I)
 API_KEY_RE = re.compile(r"(AKIA|ASIA|SK|sk_live_)[A-Za-z0-9]{16,}", re.I)
 PHRASE_RE  = re.compile(r"(password|secret|apikey|token)", re.I)
 
@@ -36,7 +37,7 @@ load_dotenv()
 genai_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 # ── CLI ─────────────────────────────────────────────────────────
-p = argparse.ArgumentParser(description="Screen capture + auto-redact (v7.3)")
+p = argparse.ArgumentParser(description="Screen capture + auto-redact (v7.2)")
 p.add_argument("-w","--window")
 p.add_argument("--rtmp")
 p.add_argument("--fps", type=int, default=30)
@@ -58,17 +59,20 @@ mp_face = mp.solutions.face_detection.FaceDetection(
     model_selection=0, min_detection_confidence=0.6)
 
 PROMPT = """You are a security assistant reading raw OCR lines.
-Return indexes of lines that COULD be sensitive.
-### Example
-0: apiKey: sk_live_abc…
-1: hello
+Return *indexes* of any line that COULD be sensitive.
+### Example 1
+0: sk_live_abc…
+1: hello world
+→ [0]
+### Example 2
+0: 555-123-4567
+1: foo
 → [0]
 ### Lines
 {strings}
 JSON only, e.g. [1,3]
 """
 
-# ── OCR helpers ─────────────────────────────────────────────────
 def preprocess(gray:np.ndarray)->np.ndarray:
     sharp=cv2.addWeighted(gray,1.5,cv2.GaussianBlur(gray,(0,0),1.2),-0.5,0)
     bw=cv2.adaptiveThreshold(sharp,255,cv2.ADAPTIVE_THRESH_MEAN_C,
@@ -125,7 +129,15 @@ def find_sensitive(gray:np.ndarray,scale:float):
         out.append((x1,y1,x2,y2))
     return out
 
-# ── jitter-resistant cache ─────────────────────────────────────
+# ── helper classes ──────────────────────────────────────────────
+def expand(b,pad,W,H):
+    x1,y1,x2,y2=b
+    return (max(0,x1-pad),max(0,y1-pad),min(W,x2+pad),min(H,y2+pad))
+
+def blur(img,x1,y1,x2,y2,k):
+    roi=img[y1:y2,x1:x2]
+    if roi.size: img[y1:y2,x1:x2]=cv2.GaussianBlur(roi,(k,k),0)
+
 def iou(a,b):
     x1=max(a[0],b[0]); y1=max(a[1],b[1])
     x2=min(a[2],b[2]); y2=min(a[3],b[3])
@@ -133,48 +145,30 @@ def iou(a,b):
     if not inter: return 0.0
     return inter/float((a[2]-a[0])*(a[3]-a[1])+(b[2]-b[0])*(b[3]-b[1])-inter)
 
-class StableBoxCache:
-    """Rectangle cache that requires N consecutive misses before removal."""
-    def __init__(self,hold:int, thr=0.20, max_misses=5, alpha=0.3):
-        self.hold=hold
-        self.thr=thr
-        self.max_misses=max_misses
-        self.alpha=alpha
-        self.items=[]  # each: {'box':(x1,y1,x2,y2),'ttl':hold,'miss':0}
-
-    def _ema(self,old,new): return int(old*(1-self.alpha)+new*self.alpha)
-
+class SmoothPersistent:
+    """Persistent cache that *smooths* box edges to stop flicker."""
+    def __init__(self,hold,thresh=0.3,smooth=0.3):
+        self.hold=hold; self.thresh=thresh; self.smooth=smooth; self.items=[]
+    def _ema(self,old,new):          # exponential moving average
+        return int(old*(1-self.smooth)+new*self.smooth)
     def update(self,new_boxes):
-        # Mark all existing as unmatched
-        for it in self.items: it["matched"]=False
-
-        # Try to match each new box to an existing one
+        for it in self.items: it["ttl"]-=1
         for nb in new_boxes:
             for it in self.items:
-                if iou(nb,it["box"])>=self.thr:
+                if iou(nb,it["box"])>=self.thresh:
+                    # smooth each coordinate, clamp jitter ≤2 px
                     ox1,oy1,ox2,oy2=it["box"]
                     nx1,ny1,nx2,ny2=nb
-                    it["box"]=(self._ema(ox1,nx1),self._ema(oy1,ny1),
-                               self._ema(ox2,nx2),self._ema(oy2,ny2))
-                    it["ttl"]=self.hold
-                    it["miss"]=0
-                    it["matched"]=True
+                    smoothed=(self._ema(ox1,nx1),self._ema(oy1,ny1),
+                              self._ema(ox2,nx2),self._ema(oy2,ny2))
+                    # tiny jitter filter
+                    if max(abs(smoothed[i]-ox) for i,ox in enumerate(it["box"]))<=2:
+                        smoothed=it["box"]  # ignore micro-shake
+                    it["box"],it["ttl"]=smoothed,self.hold
                     break
             else:
-                self.items.append(
-                    {"box":nb,"ttl":self.hold,"miss":0,"matched":True})
-
-        # Handle misses and ageing
-        kept=[]
-        for it in self.items:
-            if not it["matched"]:
-                it["miss"]+=1
-            if it["miss"]>=self.max_misses:
-                continue                      # drop after max_misses
-            it["ttl"]-=1
-            if it["ttl"]>0: kept.append(it)
-        self.items=kept
-
+                self.items.append({"box":nb,"ttl":self.hold})
+        self.items=[it for it in self.items if it["ttl"]>0]
     def shift(self,dx,dy,W,H):
         if dx==dy==0: return
         kept=[]
@@ -185,17 +179,7 @@ class StableBoxCache:
             it["box"]=(max(0,x1),max(0,y1),min(W,x2),min(H,y2))
             kept.append(it)
         self.items=kept
-
     def boxes(self): return [it["box"] for it in self.items]
-
-# ── misc helpers ────────────────────────────────────────────────
-def expand(b,pad,W,H):
-    x1,y1,x2,y2=b
-    return (max(0,x1-pad),max(0,y1-pad),min(W,x2+pad),min(H,y2+pad))
-
-def blur(img,x1,y1,x2,y2,k):
-    roi=img[y1:y2,x1:x2]
-    if roi.size: img[y1:y2,x1:x2]=cv2.GaussianBlur(roi,(k,k),0)
 
 def pick_monitor(sct,title):
     if title and platform.system()=="Windows":
@@ -210,10 +194,9 @@ def pick_monitor(sct,title):
 # ── main loop ───────────────────────────────────────────────────
 with mss() as sct, ThreadPoolExecutor(max_workers=1) as pool:
     mon=pick_monitor(sct,args.window); W,H=mon["width"],mon["height"]
-    face_cache=StableBoxCache(args.hold)
-    text_cache=StableBoxCache(args.hold)
-    future=None; last_txt=[]; prev_small=None
-
+    face_cache=SmoothPersistent(args.hold)
+    text_cache=SmoothPersistent(args.hold)
+    future=None; last_txt=[]; prev_gray_small=None
     ffmpeg=None
     if args.rtmp:
         ffmpeg=subprocess.Popen([
@@ -225,18 +208,18 @@ with mss() as sct, ThreadPoolExecutor(max_workers=1) as pool:
     frame_i=0
     try:
         while True:
-            t0=time.time()
+            start=time.time()
             frame=np.ascontiguousarray(np.array(sct.grab(mon))[:,:,:3])
 
-            # scroll shift
-            small=cv2.resize(cv2.cvtColor(frame,cv2.COLOR_BGR2GRAY),(W//8,H//8))
-            if prev_small is not None:
-                shift,resp=cv2.phaseCorrelate(prev_small.astype(np.float32),
-                                              small.astype(np.float32))
-                if resp>0.15:
-                    text_cache.shift(int(round(shift[0]*8)),
-                                     int(round(shift[1]*8)),W,H)
-            prev_small=small
+            # # scroll shift
+            # small=cv2.resize(cv2.cvtColor(frame,cv2.COLOR_BGR2GRAY),(W//8,H//8))
+            # if prev_gray_small is not None:
+            #     shift,resp=cv2.phaseCorrelate(prev_gray_small.astype(np.float32),
+            #                                   small.astype(np.float32))
+            #     if resp>0.15:
+            #         text_cache.shift(int(round(shift[0]*8)),
+            #                          int(round(shift[1]*8)),W,H)
+            # prev_gray_small=small
 
             # faces
             faces=[]
@@ -270,7 +253,7 @@ with mss() as sct, ThreadPoolExecutor(max_workers=1) as pool:
                 cv2.imshow("Preview – Q quit",frame)
                 if cv2.waitKey(1)&0xFF in (ord('q'),ord('Q')): break
 
-            if (dt:=time.time()-t0)<frame_delay: time.sleep(frame_delay-dt)
+            if (dt:=time.time()-start)<frame_delay: time.sleep(frame_delay-dt)
             frame_i+=1
     finally:
         if ffmpeg: ffmpeg.stdin.close(); ffmpeg.wait()
