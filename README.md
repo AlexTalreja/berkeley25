@@ -1,9 +1,8 @@
 # Obscurify
 ### Keeping your secrets ... secret
-Obscurify aims to garuntee your security by automatically detecting and blurring sensitive information on your screen when you are screensharing.
 
 ## What it does
-Obscurify captures your desktop stream, finds anything sensitive, and live-blurs it before the pixels ever leave your machine.
+Obscurify detects sensitive information on your screen and automatically blurs it when you want to screenshare
 
 Works on both text and images (faces, passwords, names, addresses, etc.).
 
