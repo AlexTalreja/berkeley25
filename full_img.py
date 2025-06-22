@@ -130,7 +130,7 @@ def find_sensitive_text(gray_img) -> list[tuple[int,int,int,int]]:
         "Respond in this format and this format *only* without any additional text or reasoning: [1,2,3]."
     )
     try:
-        client = genai.Client(api_key="AIzaSyBDzr9beHL_Q4DNpAKVOt9CFtsU6uPFsHU")
+        client = genai.Client(api_key="")
         # prompt = "Detect the all of the prominent items in the image. The box_2d should be [ymin, xmin, ymax, xmax] normalized to 0-1000."
 
         # image = Image.open("/path/to/image.png")
