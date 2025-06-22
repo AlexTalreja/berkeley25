@@ -1,8 +1,7 @@
 # Obscurify
 ### Keeping your secrets ... secret
-
-## What it does
 Obscurify detects sensitive information on your screen and automatically blurs it when you want to screenshare
+## What it does
 
 Works on both text and images (faces, passwords, names, addresses, etc.).
 
