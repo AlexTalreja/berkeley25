@@ -17,10 +17,16 @@ import cv2, numpy as np
 from mss import mss
 import pytesseract
 import mediapipe as mp
+import openai
+import json
+import os
+from dotenv import load_dotenv
 
 # Path to the Tesseract executable (adjust if yours lives elsewhere)
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
+load_dotenv() 
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") 
 # ────────────────────────────────────────────────────────────────
 # 1. command-line arguments
 # ────────────────────────────────────────────────────────────────
@@ -58,15 +64,76 @@ pytesseract.pytesseract.tesseract_cmd = (
     r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # adjust if needed
 )
 
-def find_sensitive_text(gray_img):
-    boxes = []
-    data = pytesseract.image_to_data(gray_img, output_type=pytesseract.Output.DICT)
+# OPEN AI STUFF
+
+openai.api_key = OPENAI_API_KEY
+GPT_MODEL = "gpt-4o-mini"          # fast & cheap enough for frame-level use
+GPT_FUNC = {
+    "name": "mark_sensitive",
+    "description": "Return indexes of sensitive strings.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "indexes": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "0-based indexes that MUST be redacted."
+            }
+        },
+        "required": ["indexes"],
+    },
+}
+def find_sensitive_text(gray_img) -> list[tuple[int,int,int,int]]:
+    """
+    1. OCR the frame exactly as before (pytesseract).
+    2. Ask GPT which snippets are sensitive.
+    3. Return their bounding boxes.
+    """
+    data = pytesseract.image_to_data(
+        gray_img, output_type=pytesseract.Output.DICT
+    )
+
+    # Collect candidate strings ≥ 4 chars to keep the prompt short
+    texts, idx_map = [], []
     for i, txt in enumerate(data["text"]):
-        if not txt or len(txt) < 4:
-            continue
-        if API_KEY_RE.search(txt) or PHRASE_RE.search(txt):
-            x, y, w, h = (data[k][i] for k in ("left", "top", "width", "height"))
-            boxes.append((x, y, x + w, y + h))
+        if txt and len(txt) >= 4:
+            idx_map.append(i)     # map from compact index -> tesseract index
+            texts.append(txt)
+
+    if not texts:
+        return []
+
+    # --------  Call GPT  ----------------------------------------------------
+    prompt = (
+        "You are a security assistant looking at raw OCR output.\n"
+        "For any string that is *definitely* sensitive (API keys, "
+        "passwords, tokens, credit-card numbers, SSNs, private addresses, "
+        "personal phone numbers, etc.) you must return its index. For testing purposes now, treat the literal word password as sensitive\n\n"
+        "### Strings (index : text)\n" +
+        "\n".join(f"{i}: {t}" for i, t in enumerate(texts)) + "\n\n"
+        "Respond *only* with JSON that matches the function schema."
+    )
+    try:
+        rsp = openai.chat.completions.create(
+            model=GPT_MODEL,
+            messages=[{"role": "system", "content": "You are a helpful assistant."},
+                      {"role": "user", "content": prompt}],
+            functions=[GPT_FUNC],
+            function_call={"name": "mark_sensitive"},
+            temperature=0.0,
+        )
+        sensitive = json.loads(rsp.choices[0].message.function_call.arguments)["indexes"]
+        print(sensitive)
+    except Exception as e:
+        print("OpenAI failure, falling back to old regex:", e)
+        sensitive = []   # (or call your old regex here as a backup)
+
+    # --------  Convert indexes → bounding boxes  ----------------------------
+    boxes = []
+    for compact_idx in sensitive:
+        i = idx_map[compact_idx]
+        x, y, w, h = (data[k][i] for k in ("left", "top", "width", "height"))
+        boxes.append((x, y, x + w, y + h))
     return boxes
 
 
