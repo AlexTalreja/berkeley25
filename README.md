@@ -1,4 +1,4 @@
-![Obscurify Logo](obscurify_logo.png)
+<img src="obscurify_logo.png" style="width:30%;" alt="Obscurify logo">
 # Obscurify
 ### Keeping your secrets ... secret
 Obscurify detects sensitive information on your screen and automatically blurs it when you want to screenshare
