@@ -24,20 +24,16 @@ from dotenv import load_dotenv
 import argparse, platform, subprocess, sys, time, re
 from pathlib import Path
 from typing import Optional
+import ast
 
-import ultralytics
-from google import genai
-from google.genai import types
 from PIL import Image
-from ultralytics.utils.downloads import safe_download
-from ultralytics.utils.plotting import Annotator, colors
+
 import base64
 from letta_client import Letta
 
-ultralytics.checks()
 
 # Path to the Tesseract executable (adjust if yours lives elsewhere)
-# pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 load_dotenv() 
 # OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") 
@@ -80,7 +76,7 @@ pytesseract.pytesseract.tesseract_cmd = (
 
 # OPEN AI STUFF
 
-openai.api_key = ""
+openai.api_key = "sk-let-YTMwN2JlNDAtNDNhNS00MGMzLWIyYTktYjE1ZTZjZWU2ZmE0OjE4ZDFhYTY1LTdiMjMtNDNhZC04MjU5LTM0Nzk1MjdlNmVhOQ=="
 GPT_MODEL = "gpt-4o-mini"          # fast & cheap enough for frame-level use
 GPT_FUNC = {
     "name": "mark_sensitive",
@@ -127,26 +123,37 @@ def find_sensitive_text(gray_img) -> list[tuple[int,int,int,int]]:
         "personal phone numbers, etc.) you must return its index. For testing purposes now, treat the literal word password as sensitive\n\n"
         "### Strings (index : text)\n" +
         "\n".join(f"{i}: {t}" for i, t in enumerate(texts)) + "\n\n"
-        "Respond *only* with JSON that matches the function schema."
+        "Your response should be like this format and this only without any reasoning or surrounding text: [1,2,3,4]"
     )
     try:
         client = Letta(
-            token=os.getenv("LETTA_TOKEN") ,
+            token="sk-let-YTMwN2JlNDAtNDNhNS00MGMzLWIyYTktYjE1ZTZjZWU2ZmE0OjE4ZDFhYTY1LTdiMjMtNDNhZC04MjU5LTM0Nzk1MjdlNmVhOQ==",
         )
-        response = client.templates.agents.create(
-            project="default-project",
-            template_version="numerous-chocolate-mandrill:latest",
-        )
+        # response = client.templates.agents.create(
+        #     project="default-project",
+        #     template_version="numerous-chocolate-mandrill:latest",
+        # )
         result = client.agents.messages.create(
-            agent_id=response.agents[0].id,
+            agent_id="agent-43235d24-2143-4166-8b0d-2a9c26b4434a",
             messages=[{"role": "user", "content": prompt}],
+            # include_return_message_types=["assistant_message"]
         )
-        for message in result.messages:
-            print(message)
         sensitive = []
+        # for message in result.messages:
+        #     if message.message_type == "assistant_message":
+        #         print("Message content: " + str(message.content))
+        #         content = message.content
+        #         sensitive.extend(json.loads(content)["indexes"])
+            #print("Message:" + str(message))
         for message in result.messages:
-            sensitive.extend(json.loads(message["content"])["indexes"])
-        print(sensitive)
+            print("Message",message)
+            if message.message_type == "assistant_message":
+                print("Content", message.content)
+                content = message.content
+                numbers  = ast.literal_eval(content)
+                print("array", numbers)
+                sensitive.extend(numbers)
+        print("Sensitive: " + str(sensitive))
         # rsp = openai.chat.completions.create(
         #     model=GPT_MODEL,
         #     messages=[{"role": "system", "content": "You are a helpful assistant."},
