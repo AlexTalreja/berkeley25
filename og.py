@@ -25,7 +25,7 @@ from google import genai
 
 # Path to the Tesseract executable (adjust if yours lives elsewhere)
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-client = genai.Client(api_key="AIzaSyARd2luc8NVTU9XlMw_jn4HReTswzqh4TM")
+client = genai.Client(api_key="")
 
 # load_dotenv() 
 # ────────────────────────────────────────────────────────────────
