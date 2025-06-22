@@ -20,14 +20,14 @@ import mediapipe as mp
 import openai
 import json
 import os
-# from dotenv import load_dotenv
+from dotenv import load_dotenv
 from google import genai
 
 # Path to the Tesseract executable (adjust if yours lives elsewhere)
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 client = genai.Client(api_key="")
 
-# load_dotenv() 
+load_dotenv() 
 # ────────────────────────────────────────────────────────────────
 # 1. command-line arguments
 # ────────────────────────────────────────────────────────────────
