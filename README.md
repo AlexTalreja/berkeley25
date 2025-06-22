@@ -1,8 +1,8 @@
 <img src="obscurify_logo.png" style="width:30%;" alt="Obscurify logo">
-# Obscurify
-### Keeping your secrets ... secret
+<h1> Obscurify </h1>
+<h3> Keeping your secrets ... secret</h3>
 Obscurify detects sensitive information on your screen and automatically blurs it when you want to screenshare
-## What it does
+<h2> What it does </h2>
 
 Works on both text and images (faces, passwords, names, addresses, etc.).
 
@@ -14,5 +14,5 @@ Uses multiple paths like regex, gemini, and opencv to identify sensitive informa
 
 Runs fast enough for real-time conferencing.* 
 
-## To try yourself:
+<h2> To try yourself:</h2>
 run the python file obscurify_fast.py with your own GEMINI_API_KEY and LETTA_TOKEN
