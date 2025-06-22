@@ -38,7 +38,7 @@ PHRASE_RE  = re.compile(r"(password|secret|apikey|token)", re.I)
 
 load_dotenv()
 genai_client = genai.Client(
-    api_key=os.getenv("GEMINI_API_KEY") or "AIzaSyARd2luc8NVTU9XlMw_jn4HReTswzqh4TM"
+    api_key=os.getenv("GEMINI_API_KEY")
 )
 
 # ────────────────────────────────────────────────────────────────
