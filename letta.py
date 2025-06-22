@@ -131,7 +131,7 @@ def find_sensitive_text(gray_img) -> list[tuple[int,int,int,int]]:
     )
     try:
         client = Letta(
-            token="sk-let-YTMwN2JlNDAtNDNhNS00MGMzLWIyYTktYjE1ZTZjZWU2ZmE0OjE4ZDFhYTY1LTdiMjMtNDNhZC04MjU5LTM0Nzk1MjdlNmVhOQ==",
+            token=os.getenv("LETTA_TOKEN") ,
         )
         response = client.templates.agents.create(
             project="default-project",
