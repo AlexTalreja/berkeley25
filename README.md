@@ -1,6 +1,6 @@
 # Obscurify
 ### Keeping your secrets ... secret
-Obscurify aims to garuntee your security by automatically detecting and blurring sensitive information on your screen when sharing in a virtual meeting.
+Obscurify aims to garuntee your security by automatically detecting and blurring sensitive information on your screen when you are screensharing.
 
 ## What it does
 Obscurify captures your desktop stream, finds anything sensitive, and live-blurs it before the pixels ever leave your machine.
