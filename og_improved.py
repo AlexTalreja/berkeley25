@@ -35,29 +35,33 @@ MODEL_NAME = "gemini-1.5-flash-latest"   # use a fast, low-cost text model
 model      = genai.GenerativeModel(MODEL_NAME)
 
 # ── Gemini prompt template ──────────────────────────────────────────────────
-PROMPT = """You are a security assistant. Here are OCR lines (index : text):
+# ── Gemini prompt template (tightened) ──────────────────────────────────────
+PROMPT = """You are a security assistant tasked with deciding which OCR lines
+from a live screen **must** be blurred to protect privacy/security.
 
+The OCR text may contain small errors (missing characters, substitutions like
+“8” for “B”, etc.). You may *mentally correct* obvious typos, but be
+**conservative**:  only mark a line if, after correction, you are ≳80 % sure it
+really exposes sensitive information.
+
+Treat as sensitive – if clearly present (even with minor OCR noise):
+• Passwords, passphrases, API tokens, “secret_key”-style strings
+• Credit-card or bank numbers (≈ 12–19 digits, with or without spaces/dashes)
+• Personal phone numbers (7–15 digits) or e-mail addresses
+• Street / mailing addresses (number + street + city/state/zip)
+• Personal names **when** paired with other private data on the *same* line
+
+Do **NOT** mark a line that merely contains generic tech terms like “login”,
+“id”, “user”, “password”, etc., **unless** there is strong evidence (digits,
+special tokens) that an actual secret is shown.
+
+If nothing is sensitive, return [].
+
+Input lines (index : text) — remember OCR might be imperfect:
 {strings}
 
-Return ONLY a JSON array of the indexes (ints) of lines that should be blurred
-because they MIGHT reveal sensitive information.
+Return **ONLY** a JSON array of indexes, e.g. [0, 2].  No extra text."""
 
-Sensitive examples:
-• Passwords, passphrases, API tokens, secrets
-• Phone numbers (any format)
-• Street or mailing addresses
-• Credit-card or bank numbers
-• E-mail addresses
-• Personal names when combined with other data
-
-If no line is sensitive, return [].
-
-### Example
-Input
-0: foo
-1: sk_live_ABC…
-→ [1]
-"""
 
 # ── CLI ---------------------------------------------------------------------
 ap = argparse.ArgumentParser(description="Screen capture + auto-redact (v7.5)")
